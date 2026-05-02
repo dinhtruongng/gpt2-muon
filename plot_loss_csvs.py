@@ -78,7 +78,7 @@ def main():
     parser.add_argument(
         "--log-dir",
         type=Path,
-        default=Path("logs"),
+        default=Path("logs/e89aa444-0e2e-4253-a8d6-69833bfa305c/0.06"),
         help="Directory to scan when train_csv and val_csv are omitted.",
     )
     parser.add_argument(

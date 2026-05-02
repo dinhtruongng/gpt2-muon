@@ -16,7 +16,7 @@ from pathlib import Path
 
 import torch
 from torch import Tensor, nn
-from torch.optim import AdamW
+from torch.optim import AdamW, SGD
 import torch.nn.functional as F
 import torch.distributed as dist
 
@@ -157,8 +157,12 @@ class GPT(nn.Module):
         self.embed = nn.Embedding(vocab_size, model_dim).bfloat16()
         self.blocks = nn.ModuleList([Block(model_dim) for _ in range(num_layers)])
         self.proj = Linear(model_dim, vocab_size)
-        self.norm1 = RMSNorm(model_dim)
-        self.norm2 = RMSNorm(model_dim)
+        # self.norm1 = RMSNorm(model_dim)
+        # self.norm2 = RMSNorm(model_dim)
+        self.norm1 = FrobeniusNorm()
+        self.norm2 = FrobeniusNorm()
+        # self.norm1 = nn.Identity()
+        # self.norm2 = nn.Identity()
 
     def forward(self, inputs: Tensor, targets: Tensor):
         x = self.norm1(self.embed(inputs))
@@ -282,7 +286,7 @@ val_inputs, val_targets = next(distributed_data_generator("data/fineweb10B/finew
 
 # we want to minimize this while still reaching 3.28 val loss
 train_steps = 500
-muon_learning_rates = [0.025]
+muon_learning_rates = [0.05, 0.08, 0.1, 0.2, 0.3]
 
 
 ########################################
@@ -325,8 +329,8 @@ def run_training(lr: float):
                         dict(params=[model.proj.weight], lr=1/320),
                         dict(params=[p for p in model.parameters() if p.ndim < 2], lr=0.01)],
                         betas=(0.8, 0.95), eps=1e-10, weight_decay=0, fused=True)
-    optimizer2 = Muon([p for p in model.blocks.parameters() if p.ndim >= 2],
-                        lr=lr, weight_decay=0.025)
+    optimizer2 = SGD([p for p in model.blocks.parameters() if p.ndim >= 2],
+                        lr=lr, weight_decay=0.025, momentum=0.6, nesterov=True)
     optimizers = [optimizer1, optimizer2]
     assert set(p for opt in optimizers for group in opt.param_groups
                 for p in group["params"]) == set(model.parameters())

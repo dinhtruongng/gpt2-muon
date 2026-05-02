@@ -17,8 +17,9 @@ import csv
 from pathlib import Path
 
 
-DEFAULT_NONORM_FOLDER = Path("no_norm")
-DEFAULT_NORM_FOLDER = Path("norm")
+DEFAULT_NONORM_FOLDER = Path("logs/1ec20f20-418a-49c5-82d8-4b1051943903/0.2")
+DEFAULT_NORM_FOLDER = Path("logs/b20d704f-511d-4b69-9df1-bf3894a8009e/0.2")
+DEFAULT_OUT_DIR = Path("loss_comparison_plots/0.2")
 
 
 def read_loss_csv(path: Path, loss_column: str):
@@ -123,7 +124,7 @@ def main():
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("plots"),
+        default=DEFAULT_OUT_DIR,
         help="Directory for combined PNG plots.",
     )
     parser.add_argument(
