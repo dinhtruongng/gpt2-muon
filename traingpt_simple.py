@@ -231,16 +231,20 @@ run_id = None
 logfile = None
 train_loss_csv = None
 val_loss_csv = None
+if dist.get_rank() == 0:
+    run_id = str(uuid.uuid4())
+    run_log_dir = Path("logs") / run_id
+    run_log_dir.mkdir(parents=True, exist_ok=True)
+    print(run_log_dir)
 
 def lr_log_dir_name(lr: float) -> str:
     return f"{lr:g}".replace(os.sep, "_")
 
 def setup_logging(lr: float):
-    global run_id, logfile, train_loss_csv, val_loss_csv
+    global logfile, train_loss_csv, val_loss_csv
     if dist.get_rank() == 0:
-        log_dir = Path("logs") / lr_log_dir_name(lr)
+        log_dir = Path("logs") / run_id / lr_log_dir_name(lr)
         log_dir.mkdir(parents=True, exist_ok=True)
-        run_id = uuid.uuid4()
         logfile = log_dir / f"{run_id}.txt"
         train_loss_csv = log_dir / f"{run_id}_train_loss.csv"
         val_loss_csv = log_dir / f"{run_id}_val_loss.csv"
