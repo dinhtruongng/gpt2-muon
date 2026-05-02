@@ -3,6 +3,7 @@
 Plot train and validation loss CSVs written by traingpt_simple.py.
 
 Usage:
+    python3 plot_loss_csvs.py
     python3 plot_loss_csvs.py logs/<run_id>_train_loss.csv logs/<run_id>_val_loss.csv
 """
 
@@ -54,16 +55,36 @@ def infer_prefix(train_csv: Path) -> str:
     return train_csv.stem[:-len(suffix)] if train_csv.stem.endswith(suffix) else "loss"
 
 
+def find_latest_loss_csvs(log_dir: Path):
+    train_csvs = sorted(
+        log_dir.glob("*_train_loss.csv"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for train_csv in train_csvs:
+        prefix = infer_prefix(train_csv)
+        val_csv = log_dir / f"{prefix}_val_loss.csv"
+        if val_csv.exists():
+            return train_csv, val_csv
+    raise SystemExit(
+        f"Could not find a matching *_train_loss.csv and *_val_loss.csv pair in {log_dir}"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Plot train and validation loss from CSV files.")
-    parser.add_argument("train_csv", type=Path, help="CSV with columns: step, train_loss", 
-                        default="logs/2b7fd8ea-d3bd-41ac-821e-6822d7056dbb_train_loss.csv")
-    parser.add_argument("val_csv", type=Path, help="CSV with columns: step, val_loss"
-                        , default="logs/2b7fd8ea-d3bd-41ac-821e-6822d7056dbb_val_loss.csv")
+    parser.add_argument("train_csv", nargs="?", type=Path, help="CSV with columns: step, train_loss")
+    parser.add_argument("val_csv", nargs="?", type=Path, help="CSV with columns: step, val_loss")
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        default=Path("logs"),
+        help="Directory to scan when train_csv and val_csv are omitted.",
+    )
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default="logs",
+        default=None,
         help="Directory for PNG plots. Defaults to the train CSV directory.",
     )
     parser.add_argument(
@@ -73,8 +94,15 @@ def main():
     )
     args = parser.parse_args()
 
-    train_csv = args.train_csv
-    val_csv = args.val_csv
+    if (args.train_csv is None) != (args.val_csv is None):
+        raise SystemExit("Pass both train_csv and val_csv, or omit both to use the latest logs pair.")
+
+    if args.train_csv is None:
+        train_csv, val_csv = find_latest_loss_csvs(args.log_dir)
+    else:
+        train_csv = args.train_csv
+        val_csv = args.val_csv
+
     out_dir = args.out_dir or train_csv.parent
     out_dir.mkdir(parents=True, exist_ok=True)
     prefix = args.prefix or infer_prefix(train_csv)
