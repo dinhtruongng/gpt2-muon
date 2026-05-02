@@ -56,12 +56,14 @@ def infer_prefix(train_csv: Path) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Plot train and validation loss from CSV files.")
-    parser.add_argument("train_csv", type=Path, help="CSV with columns: step, train_loss")
-    parser.add_argument("val_csv", type=Path, help="CSV with columns: step, val_loss")
+    parser.add_argument("train_csv", type=Path, help="CSV with columns: step, train_loss", 
+                        default="logs/2b7fd8ea-d3bd-41ac-821e-6822d7056dbb_train_loss.csv")
+    parser.add_argument("val_csv", type=Path, help="CSV with columns: step, val_loss"
+                        , default="logs/2b7fd8ea-d3bd-41ac-821e-6822d7056dbb_val_loss.csv")
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=None,
+        default="logs",
         help="Directory for PNG plots. Defaults to the train CSV directory.",
     )
     parser.add_argument(
