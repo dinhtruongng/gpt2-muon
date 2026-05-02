@@ -1,0 +1,10 @@
+[project]
+name = "gpt2-muon"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12, <3.13"
+dependencies = [
+    "huggingface-hub>=1.13.0",
+    "torch==2.11",
+]
