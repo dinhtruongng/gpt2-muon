@@ -7,6 +7,7 @@ Each folder should contain a matching pair:
     *_val_loss.csv
 
 Usage:
+    python3 compare_loss_folders.py
     python3 compare_loss_folders.py path/to/nonorm/logs path/to/norm/logs
     python3 compare_loss_folders.py path/to/nonorm/logs path/to/norm/logs --out-dir plots
 """
@@ -14,6 +15,10 @@ Usage:
 import argparse
 import csv
 from pathlib import Path
+
+
+DEFAULT_NONORM_FOLDER = Path("no_norm")
+DEFAULT_NORM_FOLDER = Path("norm")
 
 
 def read_loss_csv(path: Path, loss_column: str):
@@ -94,8 +99,20 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create combined train-loss and val-loss plots for two log folders."
     )
-    parser.add_argument("nonorm_folder", type=Path, help="Folder containing NoNorm loss CSVs")
-    parser.add_argument("norm_folder", type=Path, help="Folder containing Norm loss CSVs")
+    parser.add_argument(
+        "nonorm_folder",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_NONORM_FOLDER,
+        help=f"Folder containing NoNorm loss CSVs. Default: {DEFAULT_NONORM_FOLDER}",
+    )
+    parser.add_argument(
+        "norm_folder",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_NORM_FOLDER,
+        help=f"Folder containing Norm loss CSVs. Default: {DEFAULT_NORM_FOLDER}",
+    )
     parser.add_argument(
         "--labels",
         nargs=2,
