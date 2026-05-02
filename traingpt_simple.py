@@ -65,6 +65,18 @@ class RMSNorm(nn.Module):
     def forward(self, x):
         return F.rms_norm(x, (x.size(-1),), weight=self.gains.type_as(x))
 
+class FrobeniusNorm(nn.Module):
+    def __init__(self, eps=1e-12):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, x: Tensor):
+        # x is B x T x C.
+        # Treat each sample's T x C activation as matrix X.
+        scale = x.float().square().sum(dim=(-2, -1), keepdim=True).clamp_min(self.eps).rsqrt()
+        return (x.float() * scale).type_as(x)
+
+
 class Linear(nn.Linear):
     def __init__(self, in_features, out_features):
         super().__init__(in_features, out_features, bias=True)
