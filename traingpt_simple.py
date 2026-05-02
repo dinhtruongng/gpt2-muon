@@ -9,6 +9,7 @@ import os
 import sys
 with open(sys.argv[0]) as f:
     code = f.read() # read the code of this file ASAP, for logging
+import csv
 import uuid
 import time
 from pathlib import Path
@@ -226,9 +227,16 @@ dist.barrier()
 assert 8 % dist.get_world_size() == 0
 
 # logging setup
+run_id = None
+logfile = None
+train_loss_csv = None
+val_loss_csv = None
 if dist.get_rank() == 0:
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/{uuid.uuid4()}.txt"
+    run_id = uuid.uuid4()
+    logfile = f"logs/{run_id}.txt"
+    train_loss_csv = f"logs/{run_id}_train_loss.csv"
+    val_loss_csv = f"logs/{run_id}_val_loss.csv"
     print(logfile)
 def print0(s, console=False, log=True):
     if dist.get_rank() == 0:
@@ -245,9 +253,9 @@ print0(f"Running PyTorch {torch.version.__version__} compiled for CUDA {torch.ve
        + f" on {torch.cuda.get_device_name(device)} with world_size {dist.get_world_size()}")
 print0("="*100)
 
-val_tokens = 20 * 524288
-batch_size = 8 * 64 * 1024
-mbs = 64
+val_tokens = 2 * 524288
+batch_size = 4 * 16 * 1024
+mbs = 16
 val_inputs, val_targets = next(distributed_data_generator("data/fineweb10B/fineweb_val_*.bin", val_tokens))
 
 model = GPT(vocab_size=50304, num_layers=12, model_dim=768).cuda()
@@ -261,7 +269,7 @@ model.compile(dynamic=False)
 ########################################
 
 # we want to minimize this while still reaching 3.28 val loss
-train_steps = 3375
+train_steps = 500
 
 # initialize model parameters
 for name, p in model.named_parameters():
@@ -290,21 +298,21 @@ optimizer2 = Muon([p for p in model.blocks.parameters() if p.ndim >= 2],
 optimizers = [optimizer1, optimizer2]
 assert set(p for opt in optimizers for group in opt.param_groups
             for p in group["params"]) == set(model.parameters())
-for opt in optimizers:
-    for group in opt.param_groups:
-        group["initial_lr"] = group["lr"]
+# for opt in optimizers:
+#     for group in opt.param_groups:
+#         group["initial_lr"] = group["lr"]
 
 # learning rate schedule: stable then decay
-def set_hparams(step, cooldown_frac=0.7):
-    progress = step / train_steps
-    assert 0 <= progress < 1
-    if progress < 1 - cooldown_frac:
-        eta = 1.0
-    else:
-        eta = (1 - progress) / cooldown_frac
-    for opt in optimizers:
-        for group in opt.param_groups:
-            group["lr"] = group["initial_lr"] * eta
+# def set_hparams(step, cooldown_frac=0.7):
+#     progress = step / train_steps
+#     assert 0 <= progress < 1
+#     if progress < 1 - cooldown_frac:
+#         eta = 1.0
+#     else:
+#         eta = (1 - progress) / cooldown_frac
+#     for opt in optimizers:
+#         for group in opt.param_groups:
+#             group["lr"] = group["initial_lr"] * eta
 
 
 ########################################
@@ -317,12 +325,14 @@ for p in model.parameters():
 # start the clock
 training_time = 0
 last_val_step = 0
+train_loss_rows = []
+val_loss_rows = []
 dist.barrier()
 t0 = time.perf_counter()
 for step in range(train_steps + 1):
 
     # --------------- VALIDATION SECTION -----------------
-    if step == train_steps or step % 125 == 0:
+    if step == train_steps or step % 50 == 0:
         # stop the clock
         dist.barrier()
         time_since_last_val = time.perf_counter() - t0
@@ -337,7 +347,10 @@ for step in range(train_steps + 1):
                 val_loss += model(val_inputs[i*mbs:(i+1)*mbs], val_targets[i*mbs:(i+1)*mbs])
         dist.all_reduce(val_loss, op=dist.ReduceOp.SUM)
         val_loss /= val_tokens
-        print0(f"step:{step}/{train_steps} val_loss:{val_loss:.5f} train_time:{training_time:.3f}s"
+        val_loss_value = val_loss.item()
+        if dist.get_rank() == 0:
+            val_loss_rows.append((step, val_loss_value, training_time, 1000 * step_avg))
+        print0(f"step:{step}/{train_steps} val_loss:{val_loss_value:.5f} train_time:{training_time:.3f}s"
                 + f" step_avg:{1000*step_avg:.2f}ms", console=True)
         model.train()
         # start the clock again
@@ -351,18 +364,39 @@ for step in range(train_steps + 1):
     inputs, targets = next(train_loader)
     # accumulate across microbatches in case we are running with fewer than 8 gpus
     assert len(inputs) % mbs == 0
+    train_loss = torch.zeros((), device=device)
     for i in range(len(inputs) // mbs):
-        model(inputs[i*mbs:(i+1)*mbs], targets[i*mbs:(i+1)*mbs]).backward()
+        loss = model(inputs[i*mbs:(i+1)*mbs], targets[i*mbs:(i+1)*mbs])
+        train_loss += loss.detach()
+        loss.backward()
+    dist.all_reduce(train_loss, op=dist.ReduceOp.SUM)
+    train_loss /= batch_size
     for name, p in model.named_parameters():
         assert p.grad is not None, name
         dist.all_reduce(p.grad, op=dist.ReduceOp.SUM)
     # set optimization hyperparameters and take a step
-    set_hparams(step)
+    # set_hparams(step)
     for opt in optimizers:
         opt.step()
     model.zero_grad(set_to_none=True)
     approx_training_time = training_time + (time.perf_counter() - t0)
-    print0(f"step:{step+1}/{train_steps} train_time:{approx_training_time:.3f}s"
+    train_loss_value = train_loss.item()
+    step_avg_ms = 1000 * approx_training_time / (step + 1)
+    if dist.get_rank() == 0:
+        train_loss_rows.append((step + 1, train_loss_value, approx_training_time, step_avg_ms))
+    print0(f"step:{step+1}/{train_steps} train_loss:{train_loss_value:.5f} train_time:{approx_training_time:.3f}s"
             + f" step_avg:{1000*approx_training_time/(step + 1):.2f}ms", console=True, log=False)
+
+if dist.get_rank() == 0:
+    with open(train_loss_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["step", "train_loss", "train_time_s", "step_avg_ms"])
+        writer.writerows(train_loss_rows)
+    with open(val_loss_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["step", "val_loss", "train_time_s", "step_avg_ms"])
+        writer.writerows(val_loss_rows)
+    print0(f"Wrote train loss CSV: {train_loss_csv}", console=True)
+    print0(f"Wrote val loss CSV: {val_loss_csv}", console=True)
 
 dist.destroy_process_group()
